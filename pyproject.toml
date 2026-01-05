@@ -1,0 +1,15 @@
+[project]
+name = "bardagent"
+version = "0.1.0"
+description = "Assessment Agent for Bardeen.ai Recruitment Process"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ddgs>=9.10.0",
+    "langchain>=1.2.0",
+    "langchain-community>=0.4.1",
+    "langchain-google-genai>=4.1.2",
+    "plotly>=6.5.0",
+    "python-dotenv>=1.2.1",
+    "streamlit>=1.52.2",
+]
