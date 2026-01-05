@@ -1,3 +1,7 @@
+from typing import List
+
+from pydantic import BaseModel, Field
+
 AGENT_SYS_MESSAGE: str = (
     """
 <BEHAVIOR>
@@ -22,7 +26,6 @@ Remember, your ultimate goal is to assist the user effectively while making opti
 
 QUERY_MESSAGE_TEMPLATE: str = (
     """
-
 You are BardAgent, an AI agent designed to assist users by leveraging various tools and your own knowledge.
 Use tools when necessary to provide accurate and latest information.
 

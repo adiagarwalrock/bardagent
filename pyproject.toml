@@ -12,4 +12,5 @@ dependencies = [
     "plotly>=6.5.0",
     "python-dotenv>=1.2.1",
     "streamlit>=1.52.2",
+    "wikipedia>=1.4.0",
 ]

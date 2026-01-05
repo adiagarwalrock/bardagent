@@ -7,13 +7,18 @@ from typing import Any, List
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from tools import get_tools
-from utilities.prompts import AGENT_SYS_MESSAGE, QUERY_MESSAGE_TEMPLATE
-from utilities.utils import extract_tool_calls_since_last_user, normalize_content
 from utilities.logger import logger as logging
+from utilities.prompts import AGENT_SYS_MESSAGE, QUERY_MESSAGE_TEMPLATE
+from utilities.utils import normalize_content
 
 load_dotenv(".env")
 
@@ -71,27 +76,49 @@ def get_agent(**kwargs):
     return _agent
 
 
-def run_chat(user_message: str, history: List[AnyMessage]) -> List[AnyMessage]:
-    """Invoke the agent and return the last AIMessage.
-    Ensures we always return an AIMessage for downstream printing."""
+def run_chat(
+    user_message: str, history: List[AnyMessage] | None = None
+) -> List[AnyMessage]:
+    """Invoke the agent and return only the new messages it produced this turn.
+
+    The caller provides the existing `history`; we append the formatted user
+    message for this turn, run the agent, and return the delta (tool messages
+    and AI reply). We guarantee the delta ends with an AIMessage so downstream
+    printing always has a reply.
+    """
+
+    if not user_message.strip():
+        return [AIMessage(content="Please provide a non-empty message.")]
+    if history is None:
+        history = []
 
     agent = get_agent()
 
     user_msg = QUERY_MESSAGE_TEMPLATE.format(
         query=user_message, current_date=datetime.now().strftime("%Y-%m-%d")
     )
-    history.append(HumanMessage(content=user_msg))
 
-    state: dict[str, Any] = agent.invoke({"messages": list(history)})
+    turn_input: List[AnyMessage] = history + [HumanMessage(content=user_msg)]
+    pre_len = len(turn_input)
+
+    state: dict[str, Any] = agent.invoke({"messages": list(turn_input)})
 
     msgs: list[AnyMessage] = list(state.get("messages") or [])
+    delta: list[AnyMessage] = msgs[pre_len:]
 
-    if not msgs or not isinstance(msgs[-1], AIMessage):
-        logging.warning("Agent did not return an AIMessage, attempting to fix")
+    logging.info(f"Agent produced {len(delta)} new messages this turn")
 
-        return [AIMessage(content="We ran into an issue generating a response.")]
+    if not delta:
+        logging.warning("Agent returned no new messages; synthesizing fallback reply")
+        delta = [AIMessage(content="We ran into an issue generating a response.")]
 
-    return msgs[len(history) :]
+    if not isinstance(delta[-1], AIMessage):
+        logging.warning("Final message is not AIMessage; appending normalized fallback")
+        delta.append(
+            AIMessage(content=normalize_content(getattr(delta[-1], "content", "")))
+        )
+
+    return delta
 
 
 def main():
@@ -100,7 +127,15 @@ def main():
 
 if __name__ == "__main__":
 
-    history: List[AnyMessage] = []
+    from uuid import uuid4
+
+    session_id = str(uuid4())
+
+    print(f"Starting bardagent chat session {session_id}. Type 'exit' to quit.")
+    print("")
+
+    chat_history: List[AnyMessage] = []
+    total_history: List[AnyMessage] = []
 
     while True:
         user_input = input("You: ")
@@ -108,16 +143,22 @@ if __name__ == "__main__":
             print("Exiting chat. Goodbye!")
             break
 
-        start = time.time()
-        progress: List[AnyMessage] = run_chat(user_input, history)
-        ai_msg: AIMessage = progress[-1]  # type: ignore
+        start = time.perf_counter()
+        progress = run_chat(user_input, chat_history)
 
-        history.append(HumanMessage(content=user_input))
-        history.append(ai_msg)
+        # Persist only the user and AI messages in history
+        ai_msg = next(
+            (m for m in reversed(progress) if isinstance(m, AIMessage)), progress[-1]
+        )
+        chat_history.append(HumanMessage(content=user_input))
+        chat_history.append(ai_msg)
+
+        total_history.append(HumanMessage(content=user_input))
+        total_history.extend(progress)
 
         print(
-            f"BardAgent (tt: {time.time() - start}) : {normalize_content(ai_msg.content)}"
+            f"BardAgent (tt: {time.perf_counter() - start:.3f}s) : {normalize_content(ai_msg.content)}"
         )
-        print(
-            f"Tools used: {ai_msg.tool_calls if isinstance(ai_msg, AIMessage) else []}"
-        )
+
+        tool_calls = [tool.name for tool in progress if isinstance(tool, ToolMessage)]
+        print(f"Tools used: {tool_calls}")
