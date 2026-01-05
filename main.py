@@ -1,7 +1,8 @@
 import logging
 import os
 import time
-from typing import List, Sequence
+from functools import lru_cache
+from typing import Any, List, Sequence
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
@@ -9,21 +10,28 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from tools import get_tools
+from utils import normalize_content
 
 load_dotenv(".env")
 
+GEMINI_API_KEY: str | None = os.getenv("GOOGLE_API_KEY")
+
+if not GEMINI_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable not set.")
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     filename="bardagent.log",
+    filemode="a",
 )
 
 _llm = None
 _agent = None
 
 
+@lru_cache(maxsize=1)
 def get_model() -> ChatGoogleGenerativeAI:
     """Return a singleton instance of the Gemini chat model."""
 
@@ -45,6 +53,7 @@ def get_model() -> ChatGoogleGenerativeAI:
     return _llm
 
 
+@lru_cache(maxsize=1)
 def get_agent(*args, **kwargs):
     """Return a singleton instance of the agent."""
 

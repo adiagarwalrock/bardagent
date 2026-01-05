@@ -1,6 +1,9 @@
+import json
 from datetime import datetime
 from typing import List
 
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
@@ -28,10 +31,38 @@ with st.sidebar:
 # Render chat history
 for msg in st.session_state.history:
     timestamp = datetime.now().strftime("%H:%M")
+
     if isinstance(msg, HumanMessage):
         st.chat_message("user").write(f"{msg.content}  \n*{timestamp}*")
     else:
-        st.chat_message("assistant").write(f"{msg.content}  \n*{timestamp}*")
+        # parse structured output
+        try:
+            resp = msg.content
+            parsed = json.loads(resp)
+            typ = parsed.get("type", "text")
+            data = parsed.get("data")
+        except Exception:
+            typ = "text"
+            data = msg.content
+
+        if typ == "text":
+            st.chat_message("assistant").write(f"{data}  \n*{timestamp}*")
+
+        elif typ == "markdown":
+            st.chat_message("assistant").markdown(f"{data}  \n*{timestamp}*")
+
+        elif typ == "table":
+            st.chat_message("assistant").write(pd.DataFrame(data))
+
+        elif typ == "dataframe":
+            st.chat_message("assistant").dataframe(pd.DataFrame(data))
+
+        elif typ == "chart":
+            fig = px.line(x=data["x"], y=data["y"])
+            st.chat_message("assistant").plotly_chart(fig)
+
+        else:
+            st.chat_message("assistant").write(f"{msg.content}  \n*{timestamp}*")
 
 # Step 1: capture prompt
 prompt: str = st.chat_input("Ask anything...", key="chat_input") or ""
