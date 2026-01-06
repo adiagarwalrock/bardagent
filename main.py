@@ -7,12 +7,7 @@ from typing import Any, List
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
-from langchain_core.messages import (
-    AIMessage,
-    AnyMessage,
-    HumanMessage,
-    ToolMessage,
-)
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from tools import get_tools
