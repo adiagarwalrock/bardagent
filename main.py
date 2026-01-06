@@ -3,7 +3,7 @@ import os
 import time
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, List
+from typing import Any, List, Tuple
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
@@ -73,17 +73,21 @@ def get_agent(**kwargs):
 
 def run_chat(
     user_message: str, history: List[AnyMessage] | None = None
-) -> List[AnyMessage]:
-    """Invoke the agent and return only the new messages it produced this turn.
+) -> Tuple[List[AnyMessage], List]:
+    """
+    Run a chat turn with the agent.
 
-    The caller provides the existing `history`; we append the formatted user
-    message for this turn, run the agent, and return the delta (tool messages
-    and AI reply). We guarantee the delta ends with an AIMessage so downstream
-    printing always has a reply.
+    Args:
+        user_message: The user's input message.
+        history: The chat history as a list of messages.
+
+    Returns:
+        A tuple containing the list of new messages from the agent and a list of tool calls made.
+
     """
 
     if not user_message.strip():
-        return [AIMessage(content="Please provide a non-empty message.")]
+        return [AIMessage(content="Please provide a non-empty message.")], []
     if history is None:
         history = []
 
@@ -113,11 +117,13 @@ def run_chat(
             AIMessage(content=normalize_content(getattr(delta[-1], "content", "")))
         )
 
-    return delta
+    tool_calls: list = [
+        {"name": tool.name, "content": tool.content, "status": tool.status}
+        for tool in delta
+        if isinstance(tool, ToolMessage)
+    ]
 
-
-def main():
-    print("Hello from bardagent! Run `streamlit run app.py` to launch the UI.")
+    return delta, tool_calls
 
 
 if __name__ == "__main__":
@@ -139,7 +145,7 @@ if __name__ == "__main__":
             break
 
         start = time.perf_counter()
-        progress = run_chat(user_input, chat_history)
+        progress, tool_calls = run_chat(user_input, chat_history)
 
         # Persist only the user and AI messages in history
         ai_msg = next(
@@ -155,5 +161,4 @@ if __name__ == "__main__":
             f"BardAgent (tt: {time.perf_counter() - start:.3f}s) : {normalize_content(ai_msg.content)}"
         )
 
-        tool_calls = [tool.name for tool in progress if isinstance(tool, ToolMessage)]
-        print(f"Tools used: {tool_calls}")
+        print(f"Tools used: {set([tc['name'] for tc in tool_calls])}")

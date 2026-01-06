@@ -1,18 +1,31 @@
 from typing import List
 
-import wikipedia
 from langchain.tools import tool
-from langchain_community.tools import DuckDuckGoSearchRun
 
 from utilities.logger import logger
 
 
-def get_search_tools() -> List:
+def internet_search() -> List:
     """Return the list of available search tools."""
+    from langchain_community.tools import DuckDuckGoSearchRun
 
     tools = [DuckDuckGoSearchRun()]
 
     return tools
+
+
+def finance_news_tool() -> List:
+    """Return the Yahoo Finance News Tool."""
+    from langchain_community.tools.yahoo_finance_news import YahooFinanceNewsTool
+
+    return [YahooFinanceNewsTool()]
+
+
+def yt_search_tool() -> List:
+    """Return the YouTube Search Tool."""
+    from langchain_community.tools import YouTubeSearchTool
+
+    return [YouTubeSearchTool()]
 
 
 @tool
@@ -26,6 +39,8 @@ def wikipedia_search(query: str) -> str:
     Returns:
         Wikipedia article summary
     """
+    import wikipedia
+
     try:
         logger.debug(f"Searching Wikipedia for: {query}")
 

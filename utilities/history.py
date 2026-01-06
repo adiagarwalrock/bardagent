@@ -1,9 +1,11 @@
 import os
-
-from utilities.utils import write_json, read_json
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from langchain_core.messages import AnyMessage, AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+
+from utilities.utils import read_json, write_json
 
 HISTORY_FILEPATH: str = "chat_history.json"
 
@@ -48,50 +50,117 @@ SAMPLE_HISTORY = {
 """
 
 if not os.path.exists(HISTORY_FILEPATH):
-    # Create empty history file
-    write_json(HISTORY_FILEPATH, {})
+    # Create empty history file matching the documented sample shape
+    write_json(HISTORY_FILEPATH, {"history": []})
 
 
-def save_chat_history(session_id: str | None, history: list[dict]) -> None:
-    """Save or append the chat history to a JSON file."""
+def _load_history() -> Dict[str, Any]:
+    """Load history file, guaranteeing a {'history': []} shape."""
+    try:
+        data = read_json(HISTORY_FILEPATH)
+        if not isinstance(data, dict) or "history" not in data:
+            # migrate legacy shapes into new structure
+            data = {"history": []}
+        return data
+    except FileNotFoundError:
+        return {"history": []}
+
+
+def save_chat_history(
+    session_id: Optional[str],
+    history: List[AnyMessage],
+    title: Optional[str] = None,
+) -> str:
+    """Save or append chat history for a session as AI/Human messages.
+
+    Returns the session_id used (helpful when None was passed).
+    """
     if session_id is None:
         session_id = str(uuid4())
 
-    try:
-        chat_history = read_json(HISTORY_FILEPATH)
-    except FileNotFoundError:
-        chat_history = {}
+    data = _load_history()
+    sessions: List[Dict[str, Any]] = data.get("history", [])
 
-    existing_history = chat_history.get(session_id, [])
-    chat_history[session_id] = existing_history + history
+    serialized = [_message_to_record(msg) for msg in history]
 
-    write_json(HISTORY_FILEPATH, chat_history)
+    # Find existing session
+    for session in sessions:
+        if session.get("id") == session_id:
+            session["messages"] = session.get("messages", []) + serialized
+            break
+    else:
+        sessions.append(
+            {
+                "id": session_id,
+                "title": title or "Chat Session",
+                "messages": serialized,
+            }
+        )
+
+    data["history"] = sessions
+    write_json(HISTORY_FILEPATH, data)
+    return session_id
 
 
-def read_history(session_id: str) -> list[AnyMessage]:
-    """Read the chat history for a given session ID from the JSON file."""
-    try:
-        chat_history = read_json(HISTORY_FILEPATH)
-        return chat_history.get(session_id, [])
-    except FileNotFoundError:
-        return []
+def read_history(session_id: str) -> List[AnyMessage]:
+    """Read the chat history for a given session ID as message objects."""
+    data = _load_history()
+    for session in data.get("history", []):
+        if session.get("id") == session_id:
+            return [_record_to_message(r) for r in session.get("messages", [])]
+    return []
 
 
-def get_history_ids() -> list[str]:
+def get_history_ids() -> List[str]:
     """Get all session IDs with saved chat history."""
-    try:
-        chat_history = read_json(HISTORY_FILEPATH)
-        return list(chat_history.keys())
-    except FileNotFoundError:
-        return []
+    data = _load_history()
+    return [s.get("id") for s in data.get("history", []) if s.get("id")]
 
 
 def clear_history(session_id: str) -> None:
     """Clear the chat history for a given session ID."""
-    try:
-        chat_history = read_json(HISTORY_FILEPATH)
-        if session_id in chat_history:
-            del chat_history[session_id]
-            write_json(HISTORY_FILEPATH, chat_history)
-    except FileNotFoundError:
-        pass
+    data = _load_history()
+    sessions = [s for s in data.get("history", []) if s.get("id") != session_id]
+    data["history"] = sessions
+    write_json(HISTORY_FILEPATH, data)
+
+
+# Helpers --------------------------------------------------------------------
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _message_to_record(msg: AnyMessage) -> Dict[str, Any]:
+    if isinstance(msg, HumanMessage):
+        role = "human"
+    elif isinstance(msg, AIMessage):
+        role = "ai"
+    else:
+        role = "other"
+    sent_time = None
+    if hasattr(msg, "additional_kwargs"):
+        sent_time = msg.additional_kwargs.get("sent_time") or msg.additional_kwargs.get(
+            "tt"
+        )
+    return {
+        "role": role,
+        "content": msg.content,
+        "sent_time": sent_time or _now_iso(),
+    }
+
+
+def _record_to_message(record: Dict[str, Any]) -> AnyMessage:
+    role = record.get("role")
+    content = record.get("content", "")
+    sent_time = record.get("sent_time") or record.get("tt")
+    kwargs = {"sent_time": sent_time} if sent_time else {}
+
+    if role == "human":
+        return HumanMessage(content=content, additional_kwargs=kwargs)
+    if role == "ai":
+        return AIMessage(content=content, additional_kwargs=kwargs)
+
+    # Fallback to AIMessage for unknown roles to keep type consistency
+    return AIMessage(content=content, additional_kwargs=kwargs)
