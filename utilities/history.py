@@ -102,6 +102,18 @@ def save_chat_history(
     return session_id
 
 
+def get_history_meta() -> List[Dict[str, str]]:
+    """Return list of saved sessions with id and title."""
+    data = _load_history()
+    sessions = data.get("history", [])
+    meta: List[Dict[str, str]] = []
+    for session in sessions:
+        sid = session.get("id") or ""
+        title = session.get("title") or sid
+        meta.append({"id": sid, "title": title})
+    return meta
+
+
 def read_history(session_id: str) -> List[AnyMessage]:
     """Read the chat history for a given session ID as message objects."""
     data = _load_history()

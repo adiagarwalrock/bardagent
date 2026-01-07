@@ -39,9 +39,9 @@ def get_model() -> ChatGoogleGenerativeAI:
     logging.info("Creating new LLM instance")
     _llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
-        temperature=1.0,
+        temperature=0.5,
         max_tokens=None,
-        timeout=None,
+        timeout=10,
         max_retries=2,
         api_key=GEMINI_API_KEY,
     )

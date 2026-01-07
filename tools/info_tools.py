@@ -28,6 +28,9 @@ def yt_search_tool() -> List:
     return [YouTubeSearchTool()]
 
 
+def nasa_tool() -> List: ...
+
+
 @tool
 def wikipedia_search(query: str) -> str:
     """
