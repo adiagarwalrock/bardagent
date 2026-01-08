@@ -45,3 +45,9 @@
 - Never commit API keys. Validate `.env` locally and strip secrets from logs before sharing.
 - User data lives in `chat_history.json`; clear it with the UI “Clear Chat” button or via `utilities/history.clear_history` during testing.
 - When enabling scraping tools, keep max result counts and timeouts modest to avoid long-running Playwright sessions.
+
+## Mission Focus & Evaluations
+
+- The primary goal is to maximize the user's chances of getting hired; treat requirements in `TASK.pdf` as the guiding product brief and keep agent behavior aligned with its features and scope.
+- Maintain and improve evaluations; use `evals/dataset.jsonl` and `evals/run_eval.py` to add or refine cases, and track outcomes in `eval_result.json` (update intentionally when results change).
+- When shipping changes, consider how they improve performance on the hiring-assignment criteria and reflect that in new or updated eval items.

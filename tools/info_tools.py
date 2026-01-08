@@ -9,7 +9,10 @@ def internet_search() -> List:
     """Return the list of available search tools."""
     from langchain_community.tools import DuckDuckGoSearchRun
 
-    tools = [DuckDuckGoSearchRun()]
+    ddg = DuckDuckGoSearchRun()
+    ddg.name = "duckduckgo"
+    ddg.description = "Use DuckDuckGo for fresh or time-sensitive facts (news, recent events). For stable encyclopedic facts, prefer wikipedia_search first; use DuckDuckGo to double-check recency."
+    tools = [ddg]
 
     return tools
 

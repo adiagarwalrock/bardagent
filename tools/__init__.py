@@ -15,11 +15,11 @@ from utilities.logger import logger
 def get_tools() -> List:
     """Return the list of available tools."""
     tools = []
-    tools.extend(internet_search())
+    tools.extend(internet_search())  # duckduckgo
     tools.append(wikipedia_search)
+    tools.append(search_and_scrape)
     tools.extend(finance_news_tool())
     tools.extend(yt_search_tool())
-    tools.append(search_and_scrape)
 
     if "nt" == os.name:
         logger.warning("Shell tool is only available on Windows systems.")

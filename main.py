@@ -1,74 +1,14 @@
 import logging
-import os
 import time
 from datetime import datetime
-from functools import lru_cache
 from typing import Any, List, Tuple
 
-from dotenv import load_dotenv
-from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-from tools import get_tools
+from core import get_agent
 from utilities.logger import logger as logging
-from utilities.prompts import AGENT_SYS_MESSAGE, QUERY_MESSAGE_TEMPLATE
+from utilities.prompts import QUERY_MESSAGE_TEMPLATE
 from utilities.utils import normalize_content
-
-load_dotenv(".env")
-
-GEMINI_API_KEY: str | None = os.getenv("GOOGLE_API_KEY")
-
-if not GEMINI_API_KEY:
-    raise ValueError("GOOGLE_API_KEY environment variable not set.")
-
-_llm = None
-_agent = None
-
-
-@lru_cache(maxsize=1)
-def get_model() -> ChatGoogleGenerativeAI:
-    """Return a singleton instance of the Gemini chat model."""
-
-    global _llm
-
-    if _llm:
-        logging.info("Reusing existing LLM instance")
-        return _llm
-
-    logging.info("Creating new LLM instance")
-    _llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        temperature=0.5,
-        max_tokens=None,
-        timeout=10,
-        max_retries=2,
-        api_key=GEMINI_API_KEY,
-    )
-    return _llm
-
-
-@lru_cache(maxsize=1)
-def get_agent(**kwargs):
-    """Return a singleton instance of the agent."""
-
-    global _agent
-
-    if _agent:
-        logging.info("Reusing existing agent instance")
-        return _agent
-
-    logging.info("Creating new agent instance")
-
-    _agent = create_agent(
-        get_model(),
-        tools=get_tools(),
-        name="BardAgent",
-        system_prompt=AGENT_SYS_MESSAGE,
-        **kwargs,
-    )
-
-    return _agent
 
 
 def run_chat(
