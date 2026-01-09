@@ -20,6 +20,11 @@ A robust LLM-powered chatbot capable of answering open-ended questions by levera
 - Python 3.11 or higher
 - [uv](https://github.com/astral-sh/uv) (Recommended for fast dependency management) OR `pip`
 
+To install `uv`, run:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 ### Installation Steps
 
 1. **Prepare the project**
@@ -87,7 +92,7 @@ Execute the evaluation suite to benchmark agent performance.
 uv run python evals/run_eval.py --max-workers 4
 ```
 
-*Results are saved to `eval_result.json`.*
+*Note: A pre-computed evaluation run is already provided in `eval_result.json`. You can view it in the Web Dashboard or overwrite it by running the command above.*
 
 ---
 

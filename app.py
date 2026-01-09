@@ -20,7 +20,6 @@ Created by **Aditya Agarwal**.
     },
 )
 
-# Inject fixed footer
 st.markdown(
     """
     <style>
@@ -47,8 +46,8 @@ st.markdown(
     }
     </style>
     <div class="footer">
-        © 2026 <a href="https://adityaagarwal.me" target="_blank">Aditya Agarwal</a> | 
-        <a href="https://github.com/adiagarwalrock" target="_blank">GitHub</a> | 
+        © 2026 <a href="https://adityaagarwal.me" target="_blank">Aditya Agarwal</a> |
+        <a href="https://github.com/adiagarwalrock" target="_blank">GitHub</a> |
         <a href="https://www.linkedin.com/in/adityaagarwal1999/" target="_blank">LinkedIn</a>
     </div>
     """,
