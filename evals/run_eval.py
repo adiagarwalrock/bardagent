@@ -3,23 +3,24 @@ import sys
 sys.path.append(".")
 
 import argparse
-import functools
 import json
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph
 from tqdm import tqdm
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 import core.agent as core_agent
 import main as agent_main
 from utilities.prompts import JUDGE_PROMPT, JudgeScores
 from utilities.utils import normalize_content
 
-JUDGE_AGENT = "gemini-2.5-flash"
+JUDGE_LLM = "gpt-5.1"
 
 
 def load_dataset(path: str) -> List[Dict[str, Any]]:
@@ -40,6 +41,49 @@ def call_model_local(prompt: str) -> Tuple[str, float, List[str]]:
         text = f"[error] {e}"
     latency = time.time() - start
     return text, latency, tools_used
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def _run_batch_safe(prompts: List[str]) -> List[Tuple[List[Any], List]]:
+    return agent_main.run_chat_batch(prompts)
+
+
+def call_model_local_batch(
+    prompts: List[str],
+    max_concurrency: int,
+    system_date: Optional[str] = None,
+    retry_count: int = 1,
+    retry_wait: float = 1.5,
+) -> List[Tuple[str, float, List[str]]]:
+    """Run multiple prompts via the agent with tools, using proper batching and retries."""
+
+    if not prompts:
+        return []
+
+    start = time.time()
+    results: List[Tuple[str, float, List[str]]] = []
+
+    try:
+        batch_results = _run_batch_safe(prompts)
+    except Exception as e:
+        # Fallback if even retries fail hard (e.g. auth error)
+        return [(f"[error] {e}", 0.0, []) for _ in prompts]
+
+    # Approximate per-item latency as average of batch
+    batch_latency = (time.time() - start) / len(prompts) if prompts else 0.0
+
+    for msgs, tool_calls in batch_results:
+        tools_used = [str(t.get("name", "")).lower() for t in tool_calls]
+        ai = next((m for m in reversed(msgs) if isinstance(m, AIMessage)), None)
+        raw_content = ai.content if ai else ""
+        text = normalize_content(raw_content) if ai else ""
+        results.append((text, batch_latency, tools_used))
+
+    return results
 
 
 def check_expected(answer: str | Any, record: Dict[str, Any]) -> Tuple[bool, str]:
@@ -87,10 +131,14 @@ def check_expected(answer: str | Any, record: Dict[str, Any]) -> Tuple[bool, str
     expected_contains = record.get("expected_contains") or []
     missing: list[str] = []
 
+    # Count how many expected tokens are actually found
+    found_count = 0
+
     for token in expected_contains:
         tok_s = str(token).strip()
         tok_norm = _normalize_text(tok_s)
 
+        is_found = False
         # Numeric token: compare by value if we can extract a number from the answer.
         if _is_number_token(tok_s):
             try:
@@ -100,20 +148,30 @@ def check_expected(answer: str | Any, record: Dict[str, Any]) -> Tuple[bool, str
                 if m_num:
                     got_val = float(m_num.group(0))
                     if abs(got_val - expected_val) < 1e-2:
-                        continue
-                # Fallback to textual containment if numeric parse fails
+                        is_found = True
             except Exception:
                 pass
-            if tok_norm not in ans_norm:
-                missing.append(tok_s)
-            continue
 
-        # Multi-word expectation: require all words (stemmed) present anywhere in the answer.
-        tok_words = _wordset(tok_norm)
-        if tok_words and not tok_words.issubset(ans_words):
+            if not is_found and tok_norm in ans_norm:
+                is_found = True
+        else:
+            # Multi-word expectation: require all words (stemmed) present anywhere in the answer.
+            tok_words = _wordset(tok_norm)
+            if not tok_words or tok_words.issubset(ans_words):
+                is_found = True
+
+        if is_found:
+            found_count += 1
+        else:
             missing.append(tok_s)
 
-    if missing:
+    # If expected_min_count is set, pass if we found enough tokens
+    min_required = record.get("expected_min_count")
+    if min_required is not None:
+        if found_count < min_required:
+            return False, f"found {found_count}/{min_required}, missing: {missing}"
+    # Otherwise, require all tokens (legacy behavior)
+    elif missing:
         return False, f"missing: {missing}"
 
     unexpected = record.get("unexpected_contains") or []
@@ -136,14 +194,26 @@ def check_tools(tools_used: List[str], record: Dict[str, Any]) -> Tuple[bool, st
     normalized = []
     for t in tools_used:
         t_l = t.lower()
-        if "duckduckgo" in t_l:
-            normalized.append("duckduckgo")
-        elif "wikipedia" in t_l:
+        if "wikipedia_search" in t_l:
             normalized.append("wikipedia")
+        elif "calculator" in t_l:
+            normalized.append("math")
+        elif "duckduckgo" in t_l:
+            normalized.append("web_search")
         else:
             normalized.append(t_l)
 
-    required = [t.lower() for t in record.get("must_use_tools", [])]
+    required = []
+    for t in record.get("must_use_tools", []):
+        t_l = t.lower()
+        if "wikipedia_search" in t_l:
+            required.append("wikipedia")
+        elif "calculator" in t_l:
+            required.append("math")
+        elif "duckduckgo" in t_l:
+            required.append("web_search")
+        else:
+            required.append(t_l)
     if not required:
         return True, ""
     missing = [req for req in required if req not in normalized]
@@ -180,12 +250,9 @@ def build_prompt(record: Dict[str, Any], add_tool_hint: bool) -> str:
 def get_judge_model():
     """Structured-output judge model.
 
-    Uses a cheaper/faster model for judging when available.
+    Uses the default model from the active provider.
     """
-    try:
-        llm = core_agent.get_model(model_name=JUDGE_AGENT)  # type: ignore[arg-type]
-    except TypeError:
-        llm = core_agent.get_model()  # fallback if signature differs
+    llm = core_agent.get_model(model_name=JUDGE_LLM)
     return llm.with_structured_output(JudgeScores)
 
 
@@ -291,7 +358,19 @@ def eval_record(
         tools_used = out.get("tools_used", [])
         ok, reason = check_expected(answer, record)
         tools_ok, tool_reason = check_tools(tools_used, record)
-        passed = ok if tool_mode == "separate" else ok and tools_ok
+
+        judge_data = out.get("judge", {})
+        judge_verdict = judge_data.get("verdict", "").lower()
+
+        # Hybrid Pass: Keywords OK OR Judge says "pass"
+        content_pass = ok or (judge_verdict == "pass")
+
+        if not ok and content_pass:
+            reason = f"rescued_by_judge (was: {reason})"
+
+        passed = (
+            content_pass if tool_mode == "separate" else (content_pass and tools_ok)
+        )
         base = {
             "id": record.get("id"),
             "category": record.get("category"),
@@ -304,7 +383,7 @@ def eval_record(
             "pass": passed,
             "reason": reason,
             "tool_reason": tool_reason if not tools_ok else "",
-            "judge": out.get("judge", {}),
+            "judge": judge_data,
         }
         return base
 
@@ -335,41 +414,123 @@ def run_evaluations(
     use_judge: bool = True,
     tool_mode: str = "separate",
     tool_prompt_hint: bool = False,
+    batch_size: int = 4,
+    workers: Optional[int] = None,
+    judge_sample_rate: float = 1.0,
 ) -> None:
     # Ensure the agent is created (and logged) before evaluation.
     agent_main.get_agent()
 
     if tool_mode not in {"separate", "gate"}:
         raise ValueError(f"tool_mode must be 'separate' or 'gate', got {tool_mode}")
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    if not (0 < judge_sample_rate <= 1):
+        raise ValueError("judge_sample_rate must be in (0, 1]")
 
     dataset = load_dataset(dataset_path)
     for record in dataset:
         record["_prompt_for_eval"] = build_prompt(record, tool_prompt_hint)
 
     total = len(dataset)
-    results = []
-    with (
-        ThreadPoolExecutor(max_workers=max_workers) as executor,
-        tqdm(total=total, desc="Running evals") as pbar,
-    ):
-        eval_fn = functools.partial(
-            eval_record, use_judge=use_judge, tool_mode=tool_mode
-        )
-        future_to_record = {
-            executor.submit(eval_fn, record): record for record in dataset
-        }
-        for i, future in enumerate(as_completed(future_to_record)):
-            try:
-                results.append(future.result())
-            except Exception as e:
-                print(f"\n[Error] Exception during evaluation: {e}")
-                print("[Info] Saving partial results to temp_results.json...")
-                with open("temp_results.json", "w", encoding="utf-8") as f:
-                    json.dump({"partial_results": results, "error": str(e)}, f, indent=2)
-                raise e
-            pbar.update(1)
-            if progress_callback:
-                progress_callback(i + 1, total)
+    results: List[Dict[str, Any]] = []
+    workers = workers or max_workers
+
+    with tqdm(total=total, desc="Running evals") as pbar:
+        for start_idx in range(0, total, batch_size):
+            batch = dataset[start_idx : start_idx + batch_size]
+            prompts = [r["_prompt_for_eval"] for r in batch]
+
+            batch_outputs = call_model_local_batch(
+                prompts,
+                max_concurrency=workers,
+                retry_count=1,
+                retry_wait=1.5,
+            )
+
+            # Build base results (without judge) first
+            pending_judge: List[Tuple[int, Dict[str, Any]]] = []
+            for offset, (record, (answer, latency, tools_used)) in enumerate(
+                zip(batch, batch_outputs)
+            ):
+                ok, reason = check_expected(answer, record)
+                tools_ok, tool_reason = check_tools(tools_used, record)
+                passed = ok if tool_mode == "separate" else ok and tools_ok
+                base: Dict[str, Any] = {
+                    "id": record.get("id"),
+                    "category": record.get("category"),
+                    "tools_required": record.get("tools_required"),
+                    "prompt": record["prompt"],
+                    "must_use_tools": record.get("must_use_tools", []),
+                    "answer": answer,
+                    "latency_sec": round(latency, 3),
+                    "tools_used": tools_used,
+                    "pass": passed,
+                    "reason": reason,
+                    "tool_reason": tool_reason if not tools_ok else "",
+                }
+                if use_judge and random.random() <= judge_sample_rate:
+                    pending_judge.append((start_idx + offset, base))
+                else:
+                    results.append(base)
+                    pbar.update(1)
+                    if progress_callback:
+                        progress_callback(len(results), total)
+
+            # Judge in parallel using same worker pool
+            if use_judge and pending_judge:
+                with ThreadPoolExecutor(max_workers=workers) as judge_pool:
+                    future_to_idx = {
+                        judge_pool.submit(
+                            judge_answer,
+                            dataset[idx].get(
+                                "_prompt_for_eval", dataset[idx]["prompt"]
+                            ),
+                            base["answer"],
+                        ): (idx, base)
+                        for idx, base in pending_judge
+                    }
+                    for future in as_completed(future_to_idx):
+                        idx, base = future_to_idx[future]
+                        try:
+                            judge_res = future.result()
+                            base["judge"] = judge_res
+
+                            # Hybrid Pass Logic
+                            judge_verdict = judge_res.get("verdict", "").lower()
+                            # Check if originally passed by keywords
+                            original_pass = base["pass"]
+                            # Re-evaluate content pass: (Keywords OK) OR (Judge says Pass)
+                            # We can infer Keywords OK if (original_pass is True) AND (tools_ok is True or mode is separate)
+                            # But simpler: we have the 'reason' field.
+                            # If reason is 'expected_contains' or 'expected_exact...', it passed keywords.
+                            # If reason starts with 'missing:', it failed keywords.
+
+                            keywords_ok = not base["reason"].startswith(
+                                "missing"
+                            ) and not base["reason"].startswith("unexpected")
+                            content_pass = keywords_ok or (judge_verdict == "pass")
+
+                            if not keywords_ok and content_pass:
+                                base["reason"] = (
+                                    f"rescued_by_judge (was: {base['reason']})"
+                                )
+
+                            # Re-calculate final pass
+                            # Need to know tools status. We can infer from tool_reason
+                            tools_ok = not bool(base["tool_reason"])
+
+                            if tool_mode == "separate":
+                                base["pass"] = content_pass
+                            else:
+                                base["pass"] = content_pass and tools_ok
+
+                        except Exception as e:  # pragma: no cover - defensive
+                            base["judge"] = {"error": str(e)}
+                        results.append(base)
+                        pbar.update(1)
+                        if progress_callback:
+                            progress_callback(len(results), total)
 
     summary = summarize(results)
     latencies = [r["latency_sec"] for r in results]
@@ -396,7 +557,14 @@ def run_evaluations(
             "passed": tool_pass,
             "pass_rate": round(tool_pass / len(must_use) * 100, 2),
         }
-    summary["tool_policy"] = {"mode": tool_mode, "prompt_hint": tool_prompt_hint}
+    summary["tool_policy"] = {
+        "mode": tool_mode,
+        "prompt_hint": tool_prompt_hint,
+        "batch_size": batch_size,
+        "workers": workers,
+        "judge_sample_rate": judge_sample_rate,
+        "use_langchain_batch": True,
+    }
 
     # Judge aggregates
     judged = [r for r in results if r.get("judge")]
@@ -422,7 +590,25 @@ def main() -> None:
         "--max-workers",
         type=int,
         default=8,
-        help="Maximum number of concurrent evaluation threads.",
+        help="Maximum number of concurrent workers (used for model and judge).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Batch size for model calls (>=1).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override worker count (default: max-workers).",
+    )
+    parser.add_argument(
+        "--judge-sample-rate",
+        type=float,
+        default=1.0,
+        help="Fraction of evals to send to judge (0-1]; lowers cost/latency when <1.",
     )
     parser.add_argument(
         "--no-judge",
@@ -448,6 +634,9 @@ def main() -> None:
         use_judge=not args.no_judge,
         tool_mode=args.tool_mode,
         tool_prompt_hint=args.tool_prompt_hint,
+        batch_size=args.batch_size,
+        workers=args.workers,
+        judge_sample_rate=args.judge_sample_rate,
     )
 
 

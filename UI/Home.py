@@ -193,7 +193,7 @@ if prompt:
 if st.session_state.pending:
     prompt = str(st.session_state.pending_prompt)
     tool_calls = []
-    with st.status("Thinking...", state="running", expanded=True) as status:
+    with st.status("Thinking...", state="running", expanded=False) as status:
         with st.spinner("Contacting model..."):
             try:
                 progress, tool_calls = run_chat(prompt, st.session_state.history)

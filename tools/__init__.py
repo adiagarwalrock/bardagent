@@ -5,6 +5,7 @@ from tools.action_tool import math_tool, shell_tool
 from tools.info_tools import (
     finance_news_tool,
     internet_search,
+    recent_context,
     wikipedia_search,
     yt_search_tool,
 )
@@ -15,8 +16,9 @@ from utilities.logger import logger
 def get_tools() -> List:
     """Return the list of available tools."""
     tools = []
-    tools.extend(internet_search())  # duckduckgo
+    # tools.extend(internet_search())  # duckduckgo
     tools.append(wikipedia_search)
+    tools.append(recent_context)
     tools.append(search_and_scrape)
     tools.extend(finance_news_tool())
     tools.extend(yt_search_tool())

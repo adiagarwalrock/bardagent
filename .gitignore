@@ -9,3 +9,6 @@
 *.lock
 .venv/
 .vscode/
+.uvcache/
+.ruff_cache/
+__pypackages__/

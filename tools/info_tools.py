@@ -1,6 +1,8 @@
+from datetime import datetime
 from typing import List
 
 from langchain.tools import tool
+from pydantic import BaseModel, ConfigDict, Field
 
 from utilities.logger import logger
 
@@ -11,7 +13,10 @@ def internet_search() -> List:
 
     ddg = DuckDuckGoSearchRun()
     ddg.name = "duckduckgo"
-    ddg.description = "Use DuckDuckGo for fresh or time-sensitive facts (news, recent events). For stable encyclopedic facts, prefer wikipedia_search first; use DuckDuckGo to double-check recency."
+    ddg.description = (
+        "Use for fresh/time-sensitive queries; include source + date in answers. "
+        "Prefer wikipedia_search first for stable facts; use DuckDuckGo to double-check recency."
+    )
     tools = [ddg]
 
     return tools
@@ -34,10 +39,46 @@ def yt_search_tool() -> List:
 def nasa_tool() -> List: ...
 
 
-@tool
+_RECENT_SNIPPETS: List[str] = []
+
+
+def _add_recent_snippet(snippet: str) -> None:
+    _RECENT_SNIPPETS.append(snippet)
+    # Keep the buffer small and recency-biased
+    if len(_RECENT_SNIPPETS) > 12:
+        del _RECENT_SNIPPETS[0 : len(_RECENT_SNIPPETS) - 12]
+
+
+class RecentContextArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    n: int = Field(..., description="Number of recent snippets to return. Default 3.")
+
+
+@tool(args_schema=RecentContextArgs)
+def recent_context(n: int = 3) -> str:
+    """
+    Return the freshest snippets captured from recent tool calls (max n).
+    Use to ground answers with recency. Falls back with guidance if empty.
+    """
+
+    if not _RECENT_SNIPPETS:
+        return "No recent snippets available. Run a search tool first."
+
+    n = max(1, min(n, 5))
+    latest = _RECENT_SNIPPETS[-n:][::-1]  # newest first
+    return "\n---\n".join(latest)
+
+
+class WikipediaSearchArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(..., description="Wikipedia search query")
+
+
+@tool(args_schema=WikipediaSearchArgs)
 def wikipedia_search(query: str) -> str:
     """
     Search Wikipedia for information. Use this for factual queries.
+    Use first for stable facts; include title + year/location if present.
 
     Args:
         query: Wikipedia search query
@@ -69,7 +110,9 @@ def wikipedia_search(query: str) -> str:
                 logger.info(
                     f"Successfully retrieved Wikipedia summary for: {result_title}"
                 )
-                return f"{result_title}:\n{summary}"
+                stamped = f"{result_title} (retrieved {datetime.utcnow().isoformat()} UTC):\n{summary}"
+                _add_recent_snippet(stamped)
+                return stamped
             except wikipedia.exceptions.PageError:
                 logger.debug(f"PageError for {result_title}, trying next result")
                 continue
@@ -86,7 +129,9 @@ def wikipedia_search(query: str) -> str:
                         logger.info(
                             f"Retrieved disambiguated summary for: {e.options[0]}"
                         )
-                        return f"{e.options[0]}:\n{summary}"
+                        stamped = f"{e.options[0]} (retrieved {datetime.utcnow().isoformat()} UTC):\n{summary}"
+                        _add_recent_snippet(stamped)
+                        return stamped
                     except:
                         continue
 

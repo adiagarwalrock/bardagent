@@ -3,6 +3,7 @@ from typing import List
 import sympy as sp
 from langchain_community.tools import ShellTool
 from langchain_core.tools import tool
+from pydantic import BaseModel, ConfigDict, Field
 from sympy.parsing.sympy_parser import parse_expr
 
 
@@ -18,13 +19,19 @@ from sympy.parsing.sympy_parser import (
 )
 
 
+class MathArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expression: str = Field(..., description="Mathematical expression to evaluate")
+
+
 @tool(
     "math",
+    args_schema=MathArgs,
     return_direct=True,
     description="""
     A tool for evaluating arithmetic and mid-level math expressions (fractions, exponents, roots, trig).
     Input should be a valid mathematical expression.
-    Examples of valid expressions: "2 + 2", "sin(pi/4) + cos(pi/4)", "sqrt(16) + 3^2"
+    Examples: "2 + 2", "sin(pi/4) + cos(pi/4)", "sqrt(16) + 3^2", "(125 * 1.07) cm", "45% of 220"
     """,
 )
 def math_evaluator(expression: str) -> str:

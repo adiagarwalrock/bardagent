@@ -9,6 +9,7 @@ from typing import List, Optional, TypedDict
 from ddgs import DDGS
 from langchain.tools import tool
 from langgraph.graph import StateGraph
+from pydantic import BaseModel, ConfigDict, Field
 
 from utilities.logger import logger
 from utilities.utils import clean_text
@@ -34,6 +35,13 @@ def _search_urls(query: str, max_results: int) -> List[str]:
 def _fetch_with_playwright(
     url: str, selector: Optional[str], wait_for: Optional[str], timeout: int
 ) -> str:
+    # Use a realistic User-Agent to avoid bot detection and protocol errors
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/114.0.0.0 Safari/537.36"
+    )
+
     try:
         from bs4 import BeautifulSoup
         from playwright.sync_api import sync_playwright
@@ -41,48 +49,64 @@ def _fetch_with_playwright(
         logger.error("Required packages missing for Playwright fetch", exc_info=True)
         return f"{url}\nPlaywright/bs4 not available: {exc}"
 
+    html = ""
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            page = browser.new_page(user_agent=USER_AGENT)
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-            except Exception as nav_exc:
-                # Some URLs (e.g., PDFs) trigger a download and Playwright raises.
-                if "Download is starting" in str(nav_exc):
+                if wait_for:
                     try:
-                        import requests
-
-                        resp = requests.get(
-                            url,
-                            timeout=max(timeout / 1000, 5),
-                            headers={"User-Agent": "Mozilla/5.0"},
+                        page.wait_for_selector(wait_for, timeout=timeout)
+                    except Exception:
+                        logger.warning(
+                            "wait_for selector not found; continuing", exc_info=True
                         )
-                        ctype = resp.headers.get("content-type", "")
-                        if "application/pdf" in ctype:
-                            return f"{url}\nDownloadable PDF detected; skipping Playwright rendering. (content-type: {ctype})"
-                        return (
-                            f"{url}\nDownloaded content (truncated): {resp.text[:4000]}"
-                        )
-                    except Exception as dl_exc:
-                        logger.error(
-                            "Fallback download after Playwright download trigger failed",
-                            exc_info=True,
-                        )
-                        return (
-                            f"{url}\nDownload started; fallback fetch failed: {dl_exc}"
-                        )
-                raise
-
-            if wait_for:
+                html = page.content()
+            except Exception as nav_exc:
+                error_msg = str(nav_exc)
+                # Fallback for downloads, protocol errors, or general navigation failures.
+                # Playwright is often more sensitive to protocol/SSL issues than a simple GET.
+                logger.warning(
+                    f"Playwright navigation failed for {url}: {error_msg}. Attempting fallback with requests."
+                )
                 try:
-                    page.wait_for_selector(wait_for, timeout=timeout)
-                except Exception:
-                    logger.warning(
-                        "wait_for selector not found; continuing", exc_info=True
+                    import requests
+
+                    # Use a slightly longer timeout for the fallback if the original was short
+                    fallback_timeout = max(timeout / 1000, 15)
+
+                    resp = requests.get(
+                        url,
+                        timeout=fallback_timeout,
+                        headers={
+                            "User-Agent": USER_AGENT,
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.5",
+                            "Accept-Encoding": "gzip, deflate, br",
+                            "DNT": "1",
+                            "Connection": "keep-alive",
+                            "Upgrade-Insecure-Requests": "1",
+                        },
+                        verify=True,  # Keep it secure but standard
+                    )
+                    resp.raise_for_status()
+                    ctype = resp.headers.get("content-type", "")
+                    if "application/pdf" in ctype:
+                        return f"{url}\nDownloadable PDF detected; skipping rendering. (content-type: {ctype})"
+
+                    html = resp.text
+                except Exception as fallback_exc:
+                    logger.error(
+                        f"Fallback fetch for {url} failed: {fallback_exc}",
+                        exc_info=True,
+                    )
+                    return (
+                        f"{url}\nPlaywright navigation failed: {nav_exc}\n"
+                        f"Fallback fetch also failed: {fallback_exc}"
                     )
 
-            html = page.content()
             browser.close()
 
         soup = BeautifulSoup(html, "html.parser")
@@ -141,7 +165,20 @@ def _build_search_scrape_graph():
 _SEARCH_SCRAPE_GRAPH = _build_search_scrape_graph()
 
 
-@tool
+class SearchAndScrapeArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(..., description="Search query")
+    max_results: int = Field(..., description="Max results (default 3)")
+    selector: Optional[str] = Field(
+        ..., description="CSS selector (optional, send null if none)"
+    )
+    wait_for: Optional[str] = Field(
+        ..., description="Wait for selector (optional, send null if none)"
+    )
+    timeout_ms: int = Field(..., description="Timeout in ms (default 12000)")
+
+
+@tool(args_schema=SearchAndScrapeArgs)
 def search_and_scrape(
     query: str,
     max_results: int = 3,

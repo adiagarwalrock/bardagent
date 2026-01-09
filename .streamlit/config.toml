@@ -1,13 +1,9 @@
 [theme]
 base = "light"                       # "light" or "dark"
-primaryColor = "#3B82F6"             # accent color (e.g., buttons, sliders)
-backgroundColor = "#FFFFFF"          # main page background
-secondaryBackgroundColor = "#F5F7FB" # sidebar / card background
-textColor = "#0F172A"                # primary text color
 font = "sans serif"                  # "sans serif", "serif", or "monospace"
 
 [server]
-headless = true
+# headless = true
 runOnSave = true                    # auto-reload on file save (dev friendly)
 enableCORS = true                   # keep CORS enabled per Streamlit defaults
 enableXsrfProtection = true         # safeguard POST requests (official default)
