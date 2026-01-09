@@ -7,7 +7,6 @@ font = "sans serif"                  # "sans serif", "serif", or "monospace"
 runOnSave = true                    # auto-reload on file save (dev friendly)
 enableCORS = true                   # keep CORS enabled per Streamlit defaults
 enableXsrfProtection = true         # safeguard POST requests (official default)
-address = "0.0.0.0"
 port = 8501
 
 [browser]

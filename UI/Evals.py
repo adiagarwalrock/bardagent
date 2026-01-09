@@ -21,6 +21,18 @@ with st.sidebar:
     if st.button("🚀 Run Evaluations"):
         st.session_state.running_evals = True
 
+    with st.expander("ℹ️ About", expanded=False):
+        st.markdown(
+            """
+            Created by **Aditya Agarwal**.
+            
+            - [GitHub](https://github.com/adiagarwalrock)
+            - [LinkedIn](https://www.linkedin.com/in/adityaagarwal1999/)
+            - [Portfolio](https://adityaagarwal.me)
+            """
+        )
+
+
 if st.session_state.get("running_evals", False):
     progress_bar = st.progress(0, text="Starting evaluations...")
     status_text = st.empty()

@@ -66,6 +66,18 @@ with st.sidebar:
         st.session_state.pending_prompt = ""
         st.session_state.pop("history_id_select", None)
         st.rerun()
+
+    with st.expander("ℹ️ About", expanded=False):
+        st.markdown(
+            """
+            Created by **Aditya Agarwal**.
+            
+            - [GitHub](https://github.com/adiagarwalrock)
+            - [LinkedIn](https://www.linkedin.com/in/adityaagarwal1999/)
+            - [Portfolio](https://adityaagarwal.me)
+            """
+        )
+
     st.divider()
     st.header("📜 Chat History")
     history_meta = get_history_meta()
