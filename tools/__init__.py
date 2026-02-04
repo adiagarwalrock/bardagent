@@ -9,6 +9,7 @@ from tools.info_tools import (
     wikipedia_search,
     yt_search_tool,
 )
+from tools.multimodal_tools import get_multimodal_tools
 from tools.web_fetch import search_and_scrape
 from utilities.logger import logger
 
@@ -28,6 +29,9 @@ def get_tools() -> List:
     else:
         tools.extend(shell_tool())
     tools.extend(math_tool())
+
+    # Add multimodal tools (audio, image, excel, python, youtube)
+    tools.extend(get_multimodal_tools())
 
     logger.info(f"Loaded {len(tools)} tools.")
     return tools

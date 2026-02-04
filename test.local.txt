@@ -1,0 +1,23 @@
+Progress: 1/20
+Progress: 2/20
+Progress: 3/20
+Progress: 4/20
+Progress: 5/20
+Progress: 6/20
+Progress: 7/20
+Progress: 8/20
+Progress: 9/20
+Progress: 10/20
+Progress: 11/20
+Progress: 12/20
+Progress: 13/20
+Progress: 14/20
+Progress: 15/20
+Progress: 16/20
+Progress: 17/20
+Progress: 18/20
+Progress: 19/20
+Progress: 20/20
+
+Completed 20 questions
+Results saved to gaia_results.json
