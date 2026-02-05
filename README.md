@@ -8,6 +8,7 @@ sdk_version: 5.29.0
 app_file: hf_app.py
 pinned: false
 license: mit
+hf_oauth: true
 ---
 
 # 🤖 BardAgent - GAIA Benchmark Assessment
