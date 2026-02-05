@@ -6,6 +6,8 @@ https://huggingface.co/spaces/agents-course/Final_Assignment_Template
 """
 
 import os
+import tempfile
+from pathlib import Path
 
 import gradio as gr
 import pandas as pd
@@ -21,6 +23,78 @@ from utilities.utils import normalize_content
 DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 
 
+def download_file(task_id: str, file_name: str, output_dir: Path) -> Path | None:
+    """Download a file associated with a task."""
+    if not file_name:
+        return None
+
+    url = f"{DEFAULT_API_URL}/files/{task_id}"
+    output_path = output_dir / file_name
+
+    print(f"Downloading file for task {task_id}: {file_name}")
+
+    try:
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        output_path.write_bytes(response.content)
+        print(f"Downloaded file to {output_path}")
+        return output_path
+    except Exception as e:
+        print(f"Failed to download file: {e}")
+        return None
+
+
+def build_prompt_for_question(question: str, file_path: Path | None = None) -> str:
+    """Build a prompt for the agent based on the question and any attached file."""
+    base_question = question
+
+    if file_path:
+        file_ext = file_path.suffix.lower()
+
+        if file_ext in {".mp3", ".wav", ".m4a"}:
+            base_question = f"""I have an audio file at: {file_path}
+
+Please transcribe or analyze this audio file to answer the following question:
+
+{question}"""
+
+        elif file_ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+            base_question = f"""I have an image file at: {file_path}
+
+Please analyze this image to answer the following question:
+
+{question}"""
+
+        elif file_ext in {".xlsx", ".xls"}:
+            base_question = f"""I have an Excel file at: {file_path}
+
+Please read and analyze this Excel file to answer the following question:
+
+{question}"""
+
+        elif file_ext == ".py":
+            base_question = f"""I have a Python file at: {file_path}
+
+Please execute this Python code and answer the following question based on its output:
+
+{question}"""
+
+        else:
+            base_question = f"""I have a file at: {file_path}
+
+Please analyze this file to answer the following question:
+
+{question}"""
+
+    return f"""{base_question}
+
+IMPORTANT: Provide ONLY the direct answer. No explanations, no "The answer is...", just the answer itself.
+- For lists: use comma-separated format
+- For numbers: just the number
+- For names: just the name as requested
+- Be precise and concise."""
+
+
 # ----- BARDAGENT IMPLEMENTATION ------
 class BardAgent:
     """GAIA Benchmark Agent using BardAgent's capabilities."""
@@ -28,19 +102,14 @@ class BardAgent:
     def __init__(self):
         print("BardAgent initialized.")
 
-    def __call__(self, question: str) -> str:
+    def __call__(self, question: str, file_path: Path | None = None) -> str:
         """Run the agent on a question and return a clean answer."""
         print(f"Agent received question (first 50 chars): {question[:50]}...")
+        if file_path:
+            print(f"  With file: {file_path}")
 
         try:
-            # Build prompt with exact-match instructions
-            prompt = f"""{question}
-
-IMPORTANT: Provide ONLY the direct answer. No explanations, no "The answer is...", just the answer itself.
-- For lists: use comma-separated format
-- For numbers: just the number
-- For names: just the name as requested
-- Be precise and concise."""
+            prompt = build_prompt_for_question(question, file_path)
 
             # Run the agent
             messages, _ = run_chat(prompt)
@@ -112,49 +181,62 @@ def run_and_submit_all(profile: gr.OAuthProfile | None):
         print(f"An unexpected error occurred fetching questions: {e}")
         return f"An unexpected error occurred fetching questions: {e}", None
 
-    # 3. Run Agent on all questions
+    # 3. Run Agent on all questions (with file downloads)
     results_log = []
     answers_payload = []
     print(f"Running agent on {len(questions_data)} questions...")
 
-    for item in questions_data:
-        task_id = item.get("task_id")
-        question_text = item.get("question")
-        if not task_id or question_text is None:
-            print(f"Skipping item with missing task_id or question: {item}")
-            continue
-        try:
-            submitted_answer = agent(question_text)
-            answers_payload.append(
-                {
-                    "task_id": task_id,
-                    "submitted_answer": submitted_answer,
-                }
-            )
-            results_log.append(
-                {
-                    "Task ID": task_id,
-                    "Question": (
-                        question_text[:80] + "..."
-                        if len(question_text) > 80
-                        else question_text
-                    ),
-                    "Submitted Answer": submitted_answer,
-                }
-            )
-        except Exception as e:
-            print(f"Error running agent on task {task_id}: {e}")
-            results_log.append(
-                {
-                    "Task ID": task_id,
-                    "Question": (
-                        question_text[:80] + "..."
-                        if len(question_text) > 80
-                        else question_text
-                    ),
-                    "Submitted Answer": f"AGENT ERROR: {e}",
-                }
-            )
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        for item in questions_data:
+            task_id = item.get("task_id")
+            question_text = item.get("question")
+            file_name = item.get("file_name", "")
+
+            if not task_id or question_text is None:
+                print(f"Skipping item with missing task_id or question: {item}")
+                continue
+
+            # Download file if present
+            file_path = None
+            if file_name:
+                file_path = download_file(task_id, file_name, temp_path)
+
+            try:
+                submitted_answer = agent(question_text, file_path)
+                answers_payload.append(
+                    {
+                        "task_id": task_id,
+                        "submitted_answer": submitted_answer,
+                    }
+                )
+                results_log.append(
+                    {
+                        "Task ID": task_id,
+                        "Question": (
+                            question_text[:80] + "..."
+                            if len(question_text) > 80
+                            else question_text
+                        ),
+                        "File": file_name or "-",
+                        "Submitted Answer": submitted_answer,
+                    }
+                )
+            except Exception as e:
+                print(f"Error running agent on task {task_id}: {e}")
+                results_log.append(
+                    {
+                        "Task ID": task_id,
+                        "Question": (
+                            question_text[:80] + "..."
+                            if len(question_text) > 80
+                            else question_text
+                        ),
+                        "File": file_name or "-",
+                        "Submitted Answer": f"AGENT ERROR: {e}",
+                    }
+                )
 
     if not answers_payload:
         print("Agent did not produce any answers to submit.")
