@@ -32,6 +32,44 @@ def _search_urls(query: str, max_results: int) -> List[str]:
     return [h.get("href") for h in hits if h.get("href")]
 
 
+def _fetch_with_requests(url: str) -> str | None:
+    """Simple HTTP fetch using requests - works without Playwright."""
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/114.0.0.0 Safari/537.36"
+    )
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+
+        resp = requests.get(
+            url,
+            timeout=20,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        resp.raise_for_status()
+
+        # Check for non-HTML content
+        ctype = resp.headers.get("content-type", "")
+        if "application/pdf" in ctype:
+            return f"{url}\nDownloadable PDF detected; cannot render."
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        text = soup.get_text(" ", strip=True)
+        return clean_text(text[:15000])  # Limit length
+    except Exception as e:
+        logger.debug(f"requests fetch failed for {url}: {e}")
+        return None
+
+
 def _fetch_with_playwright(
     url: str, selector: Optional[str], wait_for: Optional[str], timeout: int
 ) -> str:
@@ -46,7 +84,11 @@ def _fetch_with_playwright(
         from bs4 import BeautifulSoup
         from playwright.sync_api import sync_playwright
     except Exception as exc:  # pragma: no cover - import error surfaced to user
-        logger.error("Required packages missing for Playwright fetch", exc_info=True)
+        # Playwright not available - try requests fallback
+        logger.warning("Playwright not available, trying requests fallback")
+        result = _fetch_with_requests(url)
+        if result:
+            return result
         return f"{url}\nPlaywright/bs4 not available: {exc}"
 
     html = ""

@@ -17,7 +17,7 @@ load_dotenv(".env")
 GEMINI_API_KEY: str | None = os.getenv("GOOGLE_API_KEY")
 OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 
-GEMINI_MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 OPENAI_MODEL_NAME: str = os.getenv("OPENAI_MODEL", "gpt-4.1")
 
 MODEL_TEMPERATURE: float = float(os.getenv("MODEL_TEMPERATURE", "0.5"))

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
 # Constants
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-pro"
 SCRIPT_TIMEOUT_SECONDS = 30
 
 

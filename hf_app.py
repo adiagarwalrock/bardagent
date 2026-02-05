@@ -104,6 +104,56 @@ IMPORTANT: Provide ONLY the direct answer. No explanations, no "The answer is...
 - Be precise and concise."""
 
 
+# ----- FILE PRE-PROCESSING ------
+def preprocess_file(file_path: Path) -> str | None:
+    """Pre-process a file and return its content/analysis for injection into prompt."""
+    if not file_path or not file_path.exists():
+        return None
+
+    file_ext = file_path.suffix.lower()
+    abs_path = str(file_path.absolute())
+
+    try:
+        # Audio transcription
+        if file_ext in {".mp3", ".wav", ".m4a", ".ogg", ".flac"}:
+            from tools.multimodal_tools import transcribe_audio
+
+            result = transcribe_audio.invoke({"file_path": abs_path})
+            return f"[AUDIO TRANSCRIPTION]:\n{result}"
+
+        # Image analysis
+        elif file_ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+            from tools.multimodal_tools import analyze_image
+
+            result = analyze_image.invoke(
+                {
+                    "file_path": abs_path,
+                    "question": "Describe this image in detail, including all text, numbers, positions, and visual elements.",
+                }
+            )
+            return f"[IMAGE ANALYSIS]:\n{result}"
+
+        # Excel processing
+        elif file_ext in {".xlsx", ".xls"}:
+            from tools.multimodal_tools import read_excel
+
+            result = read_excel.invoke({"file_path": abs_path})
+            return f"[EXCEL DATA]:\n{result}"
+
+        # Python execution
+        elif file_ext == ".py":
+            from tools.multimodal_tools import execute_python
+
+            result = execute_python.invoke({"file_path": abs_path})
+            return f"[PYTHON OUTPUT]:\n{result}"
+
+    except Exception as e:
+        print(f"Error pre-processing file {file_path}: {e}")
+        return f"[FILE PROCESSING ERROR]: {e}"
+
+    return None
+
+
 # ----- BARDAGENT IMPLEMENTATION ------
 class BardAgent:
     """GAIA Benchmark Agent using BardAgent's capabilities."""
@@ -118,7 +168,29 @@ class BardAgent:
             print(f"  With file: {file_path}")
 
         try:
-            prompt = build_prompt_for_question(question, file_path)
+            # Pre-process file if present
+            file_content = None
+            if file_path and file_path.exists():
+                print(f"  Pre-processing file: {file_path}")
+                file_content = preprocess_file(file_path)
+                if file_content:
+                    print(f"  File processed: {len(file_content)} chars")
+
+            # Build prompt with file content injected
+            if file_content:
+                prompt = f"""{file_content}
+
+Based on the above file content, answer the following question:
+
+{question}
+
+IMPORTANT: Provide ONLY the direct answer. No explanations, no "The answer is...", just the answer itself.
+- For lists: use comma-separated format, alphabetized
+- For numbers: just the number
+- For names: just the name as requested
+- Be precise and concise."""
+            else:
+                prompt = build_prompt_for_question(question, file_path)
 
             # Run the agent
             messages, _ = run_chat(prompt)
