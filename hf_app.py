@@ -1,248 +1,271 @@
 """
 HuggingFace Space Application for GAIA Benchmark Assessment.
 
-This Gradio app allows users to:
-1. Log in with their HuggingFace account
-2. Fetch GAIA benchmark questions
-3. Run the bardagent on all questions
-4. Submit answers and view their score
+Based on the official template from:
+https://huggingface.co/spaces/agents-course/Final_Assignment_Template
 """
 
-import json
 import os
-from typing import List, Tuple
 
 import gradio as gr
+import pandas as pd
+import requests
 
-from gaia_runner import (
-    fetch_questions,
-    run_all_questions,
-    submit_answers,
-)
+# Import agent functionality
+from main import run_chat
+from langchain_core.messages import AIMessage
+from utilities.answer_extractor import clean_for_exact_match, extract_clean_answer
+from utilities.utils import normalize_content
 
-
-# Global state for questions and results
-_questions = []
-_results = []
-
-
-def format_questions_display(questions: List[dict]) -> str:
-    """Format questions for display in the UI."""
-    if not questions:
-        return "No questions loaded. Click 'Fetch Questions' to load them."
-
-    lines = []
-    for i, q in enumerate(questions, 1):
-        task_id = q.get("task_id", "")[:8]
-        question = q.get("question", "")[:100]
-        file_name = q.get("file_name", "")
-
-        line = f"**{i}. [{task_id}...]** {question}"
-        if len(q.get("question", "")) > 100:
-            line += "..."
-        if file_name:
-            line += f" 📎 `{file_name}`"
-        lines.append(line)
-
-    return "\n\n".join(lines)
+# --- Constants ---
+DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 
 
-def format_results_display(results: List[dict]) -> str:
-    """Format results for display in the UI."""
-    if not results:
-        return "No results yet. Click 'Run Agent' to process questions."
+# ----- BARDAGENT IMPLEMENTATION ------
+class BardAgent:
+    """GAIA Benchmark Agent using BardAgent's capabilities."""
 
-    lines = []
-    for i, r in enumerate(results, 1):
-        task_id = r.get("task_id", "")[:8]
-        question = r.get("question", "")[:60]
-        answer = r.get("submitted_answer", "")[:80]
+    def __init__(self):
+        print("BardAgent initialized.")
 
-        lines.append(f"**{i}. [{task_id}...]**")
-        lines.append(f"   Q: {question}...")
-        lines.append(f"   A: `{answer}`")
-        lines.append("")
+    def __call__(self, question: str) -> str:
+        """Run the agent on a question and return a clean answer."""
+        print(f"Agent received question (first 50 chars): {question[:50]}...")
 
-    return "\n".join(lines)
+        try:
+            # Build prompt with exact-match instructions
+            prompt = f"""{question}
 
+IMPORTANT: Provide ONLY the direct answer. No explanations, no "The answer is...", just the answer itself.
+- For lists: use comma-separated format
+- For numbers: just the number
+- For names: just the name as requested
+- Be precise and concise."""
 
-def load_questions() -> Tuple[str, str]:
-    """Fetch questions from the GAIA API."""
-    global _questions
+            # Run the agent
+            messages, _ = run_chat(prompt)
 
-    try:
-        _questions = fetch_questions()
-        status = f"✅ Loaded {len(_questions)} questions successfully!"
-        display = format_questions_display(_questions)
-        return status, display
-    except Exception as e:
-        status = f"❌ Failed to load questions: {str(e)}"
-        return status, ""
+            # Extract final AI message
+            ai_msg = next(
+                (m for m in reversed(messages) if isinstance(m, AIMessage)),
+                None,
+            )
+            raw_response = normalize_content(ai_msg.content) if ai_msg else ""
 
-
-def run_agent_on_questions(progress=gr.Progress()) -> Tuple[str, str]:
-    """Run the agent on all loaded questions."""
-    global _questions, _results
-
-    if not _questions:
-        return "❌ No questions loaded. Please fetch questions first.", ""
-
-    try:
-
-        def progress_callback(current, total):
-            progress(current / total, desc=f"Processing {current}/{total}")
-
-        _results = run_all_questions(_questions, progress_callback=progress_callback)
-
-        status = f"✅ Processed {len(_results)} questions!"
-        display = format_results_display(_results)
-        return status, display
-    except Exception as e:
-        status = f"❌ Error running agent: {str(e)}"
-        return status, ""
-
-
-def submit_to_leaderboard(
-    username: str, space_url: str, profile: gr.OAuthProfile | None
-) -> str:
-    """Submit answers to the GAIA leaderboard."""
-    global _results
-
-    if not _results:
-        return "❌ No results to submit. Run the agent first."
-
-    # Use OAuth profile username if available
-    if profile:
-        username = profile.username
-
-    if not username:
-        return "❌ Please provide your HuggingFace username or log in."
-
-    if not space_url or len(space_url) < 10:
-        return "❌ Please provide your HuggingFace Space URL (e.g., https://huggingface.co/spaces/username/bardagent/tree/main)"
-
-    try:
-        result = submit_answers(username, space_url, _results)
-
-        score = result.get("score", 0)
-        correct = result.get("correct_count", 0)
-        total = result.get("total_attempted", 0)
-        message = result.get("message", "")
-
-        status = f"""
-## 🎉 Submission Successful!
-
-**Username:** {username}
-
-**Score:** {score:.1f}% ({correct}/{total} correct)
-
-**Message:** {message}
-
-{"🏆 **Congratulations! You've earned your certificate!**" if score >= 30 else "Keep improving to reach 30%!"}
-
-Check the leaderboard: [Students Leaderboard](https://huggingface.co/spaces/agents-course/Students_leaderboard)
-"""
-        return status
-    except Exception as e:
-        return f"❌ Submission failed: {str(e)}"
-
-
-def create_app():
-    """Create the Gradio application."""
-
-    with gr.Blocks(title="BardAgent - GAIA Benchmark", theme=gr.themes.Soft()) as app:
-
-        gr.Markdown(
-            """
-# 🤖 BardAgent - GAIA Benchmark Assessment
-
-This application runs BardAgent on the GAIA benchmark questions for the 
-[HuggingFace Agents Course](https://huggingface.co/learn/agents-course/en/unit4/introduction).
-
-**Goal:** Score ≥30% to earn your Certificate of Excellence!
-
----
-"""
-        )
-
-        with gr.Row():
-            with gr.Column(scale=1):
-                gr.Markdown("### 🔐 Authentication")
-                login_btn = gr.LoginButton()
-                username_input = gr.Textbox(
-                    label="HuggingFace Username",
-                    placeholder="Your HF username (auto-filled if logged in)",
-                    interactive=True,
-                )
-                space_url_input = gr.Textbox(
-                    label="Space Code URL",
-                    placeholder="https://huggingface.co/spaces/YOUR_USERNAME/bardagent/tree/main",
-                    interactive=True,
-                )
-
-        gr.Markdown("---")
-
-        with gr.Row():
-            fetch_btn = gr.Button("📥 Fetch Questions", variant="secondary", size="lg")
-            run_btn = gr.Button("🚀 Run Agent", variant="primary", size="lg")
-            submit_btn = gr.Button("📤 Submit Answers", variant="primary", size="lg")
-
-        with gr.Row():
-            status_output = gr.Markdown(
-                "Ready to start. Click 'Fetch Questions' to begin."
+            # Clean for exact match
+            clean_answer = clean_for_exact_match(
+                extract_clean_answer(raw_response, question)
             )
 
-        with gr.Tabs():
-            with gr.TabItem("📋 Questions"):
-                questions_display = gr.Markdown("No questions loaded yet.")
+            print(f"Agent returning answer: {clean_answer[:100]}...")
+            return clean_answer
 
-            with gr.TabItem("📊 Results"):
-                results_display = gr.Markdown("No results yet.")
+        except Exception as e:
+            print(f"Agent error: {e}")
+            return f"Error: {e}"
 
-            with gr.TabItem("🏆 Submission"):
-                submission_output = gr.Markdown(
-                    "Submit your answers to see your score."
-                )
 
-        # Event handlers
-        fetch_btn.click(fn=load_questions, outputs=[status_output, questions_display])
+def run_and_submit_all(profile: gr.OAuthProfile | None):
+    """
+    Fetches all questions, runs BardAgent on them, submits all answers,
+    and displays the results.
+    """
+    # --- Determine HF Space Runtime URL and Repo URL ---
+    space_id = os.getenv("SPACE_ID")
 
-        run_btn.click(
-            fn=run_agent_on_questions, outputs=[status_output, results_display]
+    if profile:
+        username = profile.username
+        print(f"User logged in: {username}")
+    else:
+        print("User not logged in.")
+        return "Please Login to Hugging Face with the button.", None
+
+    api_url = DEFAULT_API_URL
+    questions_url = f"{api_url}/questions"
+    submit_url = f"{api_url}/submit"
+
+    # 1. Instantiate Agent
+    try:
+        agent = BardAgent()
+    except Exception as e:
+        print(f"Error instantiating agent: {e}")
+        return f"Error initializing agent: {e}", None
+
+    # Agent code URL for the leaderboard
+    agent_code = f"https://huggingface.co/spaces/{space_id}/tree/main"
+    print(f"Agent code URL: {agent_code}")
+
+    # 2. Fetch Questions
+    print(f"Fetching questions from: {questions_url}")
+    try:
+        response = requests.get(questions_url, timeout=15)
+        response.raise_for_status()
+        questions_data = response.json()
+        if not questions_data:
+            print("Fetched questions list is empty.")
+            return "Fetched questions list is empty or invalid format.", None
+        print(f"Fetched {len(questions_data)} questions.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching questions: {e}")
+        return f"Error fetching questions: {e}", None
+    except Exception as e:
+        print(f"An unexpected error occurred fetching questions: {e}")
+        return f"An unexpected error occurred fetching questions: {e}", None
+
+    # 3. Run Agent on all questions
+    results_log = []
+    answers_payload = []
+    print(f"Running agent on {len(questions_data)} questions...")
+
+    for item in questions_data:
+        task_id = item.get("task_id")
+        question_text = item.get("question")
+        if not task_id or question_text is None:
+            print(f"Skipping item with missing task_id or question: {item}")
+            continue
+        try:
+            submitted_answer = agent(question_text)
+            answers_payload.append(
+                {
+                    "task_id": task_id,
+                    "submitted_answer": submitted_answer,
+                }
+            )
+            results_log.append(
+                {
+                    "Task ID": task_id,
+                    "Question": (
+                        question_text[:80] + "..."
+                        if len(question_text) > 80
+                        else question_text
+                    ),
+                    "Submitted Answer": submitted_answer,
+                }
+            )
+        except Exception as e:
+            print(f"Error running agent on task {task_id}: {e}")
+            results_log.append(
+                {
+                    "Task ID": task_id,
+                    "Question": (
+                        question_text[:80] + "..."
+                        if len(question_text) > 80
+                        else question_text
+                    ),
+                    "Submitted Answer": f"AGENT ERROR: {e}",
+                }
+            )
+
+    if not answers_payload:
+        print("Agent did not produce any answers to submit.")
+        return "Agent did not produce any answers to submit.", pd.DataFrame(results_log)
+
+    # 4. Prepare Submission
+    submission_data = {
+        "username": username.strip(),
+        "agent_code": agent_code,
+        "answers": answers_payload,
+    }
+    status_update = f"Agent finished. Submitting {len(answers_payload)} answers for user '{username}'..."
+    print(status_update)
+
+    # 5. Submit
+    print(f"Submitting {len(answers_payload)} answers to: {submit_url}")
+    try:
+        response = requests.post(submit_url, json=submission_data, timeout=120)
+        response.raise_for_status()
+        result_data = response.json()
+        final_status = (
+            f"Submission Successful!\n"
+            f"User: {result_data.get('username')}\n"
+            f"Overall Score: {result_data.get('score', 'N/A')}% "
+            f"({result_data.get('correct_count', '?')}/{result_data.get('total_attempted', '?')} correct)\n"
+            f"Message: {result_data.get('message', 'No message received.')}"
         )
+        print("Submission successful.")
+        results_df = pd.DataFrame(results_log)
+        return final_status, results_df
+    except requests.exceptions.HTTPError as e:
+        error_detail = f"Server responded with status {e.response.status_code}."
+        try:
+            error_json = e.response.json()
+            error_detail += f" Detail: {error_json.get('detail', e.response.text)}"
+        except requests.exceptions.JSONDecodeError:
+            error_detail += f" Response: {e.response.text[:500]}"
+        status_message = f"Submission Failed: {error_detail}"
+        print(status_message)
+        results_df = pd.DataFrame(results_log)
+        return status_message, results_df
+    except requests.exceptions.Timeout:
+        status_message = "Submission Failed: The request timed out."
+        print(status_message)
+        results_df = pd.DataFrame(results_log)
+        return status_message, results_df
+    except requests.exceptions.RequestException as e:
+        status_message = f"Submission Failed: Network error - {e}"
+        print(status_message)
+        results_df = pd.DataFrame(results_log)
+        return status_message, results_df
+    except Exception as e:
+        status_message = f"An unexpected error occurred during submission: {e}"
+        print(status_message)
+        results_df = pd.DataFrame(results_log)
+        return status_message, results_df
 
-        submit_btn.click(
-            fn=submit_to_leaderboard,
-            inputs=[username_input, space_url_input],
-            outputs=[submission_output],
-        )
 
-        gr.Markdown(
-            """
----
+# --- Build Gradio Interface using Blocks ---
+with gr.Blocks() as demo:
+    gr.Markdown("# 🤖 BardAgent - GAIA Benchmark Evaluation")
+    gr.Markdown(
+        """
+        **Instructions:**
 
-### 📚 About
+        1. Log in to your Hugging Face account using the button below.
+        2. Click 'Run Evaluation & Submit All Answers' to fetch questions, run BardAgent, submit answers, and see the score.
 
-This application uses **BardAgent**, an AI agent built with LangChain and LangGraph, 
-featuring tools for:
-- 🔍 Web search and scraping
-- 📖 Wikipedia search
-- 🧮 Mathematical calculations
-- 🎵 Audio transcription
-- 🖼️ Image analysis
-- 📊 Excel file processing
-- 🐍 Python code execution
-- 📺 YouTube video analysis
+        ---
+        **About BardAgent:**
+        An AI agent built with LangChain and LangGraph featuring web search, Wikipedia, math, audio transcription, 
+        image analysis, Excel processing, Python execution, and YouTube analysis capabilities.
 
-**Source Code:** [View on HuggingFace](https://huggingface.co/spaces/agents-course/Final_Assignment_Template)
-"""
-        )
+        **Goal:** Score ≥30% to earn your Certificate of Excellence!
+        """
+    )
 
-    return app
+    gr.LoginButton()
 
+    run_button = gr.Button("🚀 Run Evaluation & Submit All Answers", variant="primary")
 
-# Create and launch the app
-app = create_app()
+    status_output = gr.Textbox(
+        label="Run Status / Submission Result", lines=5, interactive=False
+    )
+    results_table = gr.DataFrame(label="Questions and Agent Answers", wrap=True)
+
+    run_button.click(
+        fn=run_and_submit_all,
+        outputs=[status_output, results_table],
+    )
+
 
 if __name__ == "__main__":
-    app.launch()
+    print("\n" + "-" * 30 + " App Starting " + "-" * 30)
+    space_host = os.getenv("SPACE_HOST")
+    space_id = os.getenv("SPACE_ID")
+
+    if space_host:
+        print(f"✅ SPACE_HOST found: {space_host}")
+        print(f"   Runtime URL should be: https://{space_host}.hf.space")
+    else:
+        print("ℹ️  SPACE_HOST environment variable not found (running locally?).")
+
+    if space_id:
+        print(f"✅ SPACE_ID found: {space_id}")
+        print(f"   Repo URL: https://huggingface.co/spaces/{space_id}")
+        print(f"   Repo Tree URL: https://huggingface.co/spaces/{space_id}/tree/main")
+    else:
+        print("ℹ️  SPACE_ID environment variable not found (running locally?).")
+
+    print("-" * (60 + len(" App Starting ")) + "\n")
+
+    print("Launching BardAgent GAIA Evaluation Interface...")
+    demo.launch(debug=True, share=False)
