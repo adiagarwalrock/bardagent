@@ -50,37 +50,46 @@ def build_prompt_for_question(question: str, file_path: Path | None = None) -> s
 
     if file_path:
         file_ext = file_path.suffix.lower()
+        abs_path = str(file_path.absolute())
 
-        if file_ext in {".mp3", ".wav", ".m4a"}:
-            base_question = f"""I have an audio file at: {file_path}
+        if file_ext in {".mp3", ".wav", ".m4a", ".ogg", ".flac"}:
+            base_question = f"""An audio file has been downloaded to this EXACT path: {abs_path}
 
-Please transcribe or analyze this audio file to answer the following question:
+You MUST call the `transcribe_audio` tool with file_path="{abs_path}" (use this exact path, do not modify it).
+
+After transcribing, answer this question based on the audio content:
 
 {question}"""
 
         elif file_ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-            base_question = f"""I have an image file at: {file_path}
+            base_question = f"""An image file has been downloaded to this EXACT path: {abs_path}
 
-Please analyze this image to answer the following question:
+You MUST call the `analyze_image` tool with file_path="{abs_path}" (use this exact path, do not modify it).
+
+Use the image analysis to answer this question:
 
 {question}"""
 
         elif file_ext in {".xlsx", ".xls"}:
-            base_question = f"""I have an Excel file at: {file_path}
+            base_question = f"""An Excel file has been downloaded to this EXACT path: {abs_path}
 
-Please read and analyze this Excel file to answer the following question:
+You MUST call the `read_excel` tool with file_path="{abs_path}" (use this exact path, do not modify it).
+
+Use the Excel data to answer this question:
 
 {question}"""
 
         elif file_ext == ".py":
-            base_question = f"""I have a Python file at: {file_path}
+            base_question = f"""A Python file has been downloaded to this EXACT path: {abs_path}
 
-Please execute this Python code and answer the following question based on its output:
+You MUST call the `execute_python` tool with file_path="{abs_path}" (use this exact path, do not modify it).
+
+Use the Python output to answer this question:
 
 {question}"""
 
         else:
-            base_question = f"""I have a file at: {file_path}
+            base_question = f"""A file has been downloaded to this EXACT path: {abs_path}
 
 Please analyze this file to answer the following question:
 

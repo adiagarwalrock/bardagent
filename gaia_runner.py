@@ -20,30 +20,34 @@ GAIA_API_BASE = "https://agents-course-unit4-scoring.hf.space"
 REQUEST_TIMEOUT = 30
 FILE_DOWNLOAD_TIMEOUT = 60
 
-# File type to prompt template mapping
-FILE_PROMPTS = {
+# Data-driven mapping of file extensions to prompt templates
+FILE_PROMPTS: dict[str, tuple[set[str], str]] = {
     "audio": (
-        {".mp3", ".wav", ".m4a"},
-        "I have an audio file at: {file_path}\n\n"
-        "Please transcribe or analyze this audio file to answer the following question:\n\n"
+        {".mp3", ".wav", ".m4a", ".ogg", ".flac"},
+        "An audio file has been downloaded to this EXACT path: {file_path}\n\n"
+        'You MUST call the `transcribe_audio` tool with file_path="{file_path}" (use this exact path, do not modify it).\n\n'
+        "After transcribing, answer this question based on the audio content:\n\n"
         "{question}",
     ),
     "image": (
         {".png", ".jpg", ".jpeg", ".gif", ".webp"},
-        "I have an image file at: {file_path}\n\n"
-        "Please analyze this image to answer the following question:\n\n"
+        "An image file has been downloaded to this EXACT path: {file_path}\n\n"
+        'You MUST call the `analyze_image` tool with file_path="{file_path}" (use this exact path, do not modify it).\n\n'
+        "Use the image analysis to answer this question:\n\n"
         "{question}",
     ),
     "excel": (
         {".xlsx", ".xls"},
-        "I have an Excel file at: {file_path}\n\n"
-        "Please read and analyze this Excel file to answer the following question:\n\n"
+        "An Excel file has been downloaded to this EXACT path: {file_path}\n\n"
+        'You MUST call the `read_excel` tool with file_path="{file_path}" (use this exact path, do not modify it).\n\n'
+        "Use the Excel data to answer this question:\n\n"
         "{question}",
     ),
     "python": (
         {".py"},
-        "I have a Python file at: {file_path}\n\n"
-        "Please execute this Python code and answer the following question:\n\n"
+        "A Python file has been downloaded to this EXACT path: {file_path}\n\n"
+        'You MUST call the `execute_python` tool with file_path="{file_path}" (use this exact path, do not modify it).\n\n'
+        "Use the Python output to answer this question:\n\n"
         "{question}",
     ),
 }
