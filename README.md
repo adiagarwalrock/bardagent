@@ -1,5 +1,5 @@
 ---
-title: BardAgent - GAIA Benchmark
+title: BardAgent
 emoji: 🤖
 colorFrom: blue
 colorTo: purple
@@ -11,13 +11,15 @@ license: mit
 hf_oauth: true
 ---
 
-# 🤖 BardAgent - GAIA Benchmark Assessment
+# 🤖 BardAgent
 
-An AI agent built for the [HuggingFace Agents Course](https://huggingface.co/learn/agents-course/en/unit4/introduction) Unit 4 Final Assessment.
+BardAgent is a versatile AI assistant designed to leverage various tools and multimodal capabilities to help users solve complex tasks.
 
-## 🎯 Goal
+> **Note:** This deployment is currently configured for the [HuggingFace Agents Course](https://huggingface.co/learn/agents-course/en/unit4/introduction) Unit 4 Final Assessment to evaluate its performance on the GAIA benchmark.
 
-Score ≥30% on the GAIA benchmark Level 1 questions to earn your Certificate of Excellence!
+## 🎯 Benchmark Goal
+
+The current objective in this environment is to score ≥30% on the GAIA benchmark Level 1 questions using BardAgent's reasoning and tool-use capabilities.
 
 ## 🛠️ Features
 
