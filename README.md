@@ -4,7 +4,7 @@ emoji: 🤖
 colorFrom: blue
 colorTo: purple
 sdk: gradio
-sdk_version: 5.0.0
+sdk_version: 5.29.0
 app_file: hf_app.py
 pinned: false
 license: mit
